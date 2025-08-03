@@ -672,10 +672,6 @@ function renderInventory() {
                         <div class="item-detail-label">Fecha Entrega</div>
                         <div class="item-detail-value">${formatDate(item.due_date)}</div>
                     </div>
-                    <div class="item-detail">
-                        <div class="item-detail-label">Fecha Entrega</div>
-                        <div class="item-detail-value">${formatDate(item.due_date)}</div>
-                    </div>
                     <div class="item-detail ${isOverdue ? 'overdue' : isUrgent ? 'urgent' : ''}">
                         <div class="item-detail-label">Días Restantes</div>
                         <div class="item-detail-value">
@@ -1352,5 +1348,6 @@ async function clearHistory() {
         }
     );
 }
+
 
 document.addEventListener('DOMContentLoaded', init);
