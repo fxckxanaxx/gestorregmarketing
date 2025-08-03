@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REG Marketing S.A.S - Sistema de Gestión</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <img src="logo.png" alt="Logo de la empresa" style="height: 60px;">
+                
+            </div>
+            <h1>REG MARKETING</h1>
+            <div class="company-name">S.A.S</div>
+            <p>Sistema Profesional de Gestión de Producción Textil</p>
+        </header>
+
+        <div class="enterprise-stats">
+            <div class="kpi-grid">
+                <div class="kpi-card revenue">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">
+                            <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="kpi-trend positive">
+                            <i class="fas fa-arrow-up"></i>
+                            <span id="revenueTrend">+12.5%</span>
+                        </div>
+                    </div>
+                    <div class="kpi-value" id="totalRevenue">$0</div>
+                    <div class="kpi-label">Ingresos Totales</div>
+                    <div class="kpi-subtitle" id="revenueSubtitle">En órdenes activas</div>
+                </div>
+
+                <div class="kpi-card efficiency">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
+                        <div class="kpi-trend positive">
+                            <i class="fas fa-arrow-up"></i>
+                            <span id="efficiencyTrend">+8.3%</span>
+                        </div>
+                    </div>
+                    <div class="kpi-value" id="productionEfficiency">0%</div>
+                    <div class="kpi-label">Eficiencia de Producción</div>
+                    <div class="kpi-subtitle" id="efficiencySubtitle">Promedio general</div>
+                </div>
+
+                <div class="kpi-card orders">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">
+                            <i class="fas fa-shopping-bag"></i>
+                        </div>
+                        <div class="kpi-trend neutral">
+                            <i class="fas fa-minus"></i>
+                            <span id="ordersTrend">0%</span>
+                        </div>
+                    </div>
+                    <div class="kpi-value" id="totalOrders">0</div>
+                    <div class="kpi-label">Órdenes Activas</div>
+                    <div class="kpi-subtitle" id="ordersSubtitle">En proceso</div>
+                </div>
+
+                <div class="kpi-card delivery">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">
+                            <i class="fas fa-truck"></i>
+                        </div>
+                        <div class="kpi-trend" id="deliveryTrendIcon">
+                            <i class="fas fa-clock"></i>
+                            <span id="deliveryTrend">0 días</span>
+                        </div>
+                    </div>
+                    <div class="kpi-value" id="avgDeliveryTime">0</div>
+                    <div class="kpi-label">Tiempo Promedio</div>
+                    <div class="kpi-subtitle">Días hasta entrega</div>
+                </div>
+            </div>
+
+            <div class="operational-metrics">
+                <div class="metric-card production-status">
+                    <div class="metric-header">
+                        <h3><i class="fas fa-cogs"></i> Estado de Producción</h3>
+                        <div class="metric-actions">
+                            <button class="metric-btn" onclick="toggleMetricView('production')" title="Cambiar vista">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="metric-content">
+                        <div class="production-rings">
+                            <div class="production-ring" data-status="completed">
+                                <div class="ring-progress" id="completedRing"></div>
+                                <div class="ring-center">
+                                    <span class="ring-value" id="completedPercentage">0%</span>
+                                    <span class="ring-label">Completado</span>
+                                </div>
+                            </div>
+                            <div class="production-stats">
+                                <div class="prod-stat">
+                                    <span class="prod-label">En Proceso</span>
+                                    <span class="prod-value" id="inProcessCount">0</span>
+                                </div>
+                                <div class="prod-stat">
+                                    <span class="prod-label">Prioritarias</span>
+                                    <span class="prod-value priority" id="priorityDetailCount">0</span>
+                                </div>
+                                <div class="prod-stat">
+                                    <span class="prod-label">Próximas a Vencer</span>
+                                    <span class="prod-value warning" id="dueSoonCount">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metric-card client-insights">
+                    <div class="metric-header">
+                        <h3><i class="fas fa-users"></i> Top Clientes</h3>
+                        <div class="metric-actions">
+                            <button class="metric-btn" onclick="toggleMetricView('clients')" title="Ver detalle">
+                                <i class="fas fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="metric-content">
+                        <div class="client-metrics">
+                            <div class="client-metric">
+                                <div class="client-metric-icon">
+                                    <i class="fas fa-crown"></i>
+                                </div>
+                                <div class="client-metric-info">
+                                    <span class="client-metric-value" id="topClientValue">$0</span>
+                                    <span class="client-metric-label">Cliente #1</span>
+                                    <span class="client-metric-name" id="topClientName">-</span>
+                                </div>
+                            </div>
+                            <div class="client-list" id="clientRanking">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metric-card product-analytics">
+                    <div class="metric-header">
+                        <h3><i class="fas fa-tshirt"></i> Análisis de Productos</h3>
+                        <div class="metric-actions">
+                            <button class="metric-btn" onclick="exportProductAnalytics()" title="Exportar análisis">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="metric-content">
+                        <div class="product-insights">
+                            <div class="product-ranking" id="productRanking">
+                            </div>
+                            <div class="product-summary">
+                                <div class="summary-item">
+                                    <span class="summary-label">Producto más solicitado</span>
+                                    <span class="summary-value" id="topProduct">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="summary-label">Promedio de ingresos</span>
+                                    <span class="summary-value" id="averageTicket">$0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-plus-circle"></i>
+                    Agregar Nuevo Producto
+                </h2>
+                
+                <form id="productForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="clientName">Cliente *</label>
+                            <input type="text" id="clientName" required placeholder="Nombre del cliente">
+                        </div>
+                        <div class="form-group">
+                            <label for="productType">Tipo de Producto *</label>
+                            <select id="productType" required>
+                                <option value="">Seleccionar tipo</option>
+                                <option value="Camisetas de algodón estampadas">Camisetas de algodón estampadas</option>
+                                <option value="Camisetas tipo polo bordadas">Camisetas tipo polo bordadas</option>
+                                <option value="Camisetas sublimadas">Camisetas sublimadas</option>
+                                <option value="Camiseta Manga Larga">Camiseta Manga Larga</option>
+                                <option value="Gorra Beisbolera">Gorra Beisbolera</option>
+                                <option value="Gorra Camionero">Gorra Camionero</option>
+                                <option value="Tulas Deportivas">Tulas Deportivas</option>
+                                <option value="Morrales">Morrales</option>
+                                <option value="Tote Bags">Tote Bags</option>
+                                <option value="Chaleco en drill">Chaleco en drill</option>
+                                <option value="Jean dotación">Jean dotación</option>
+                                <option value="Camisas Oxford">Camisas Oxford</option>
+                                <option value="Chaqueta">Chaqueta</option>
+                                <option value="Hoodie college">Hoodie college</option>
+                                <option value="Uniforme">Uniforme</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="quantity">Cantidad *</label>
+                            <input type="number" id="quantity" required min="1" placeholder="Cantidad de productos">
+                        </div>
+                        <div class="form-group">
+                            <label for="size">Talla</label>
+                            <select id="size">
+                                <option value="">Seleccionar talla</option>
+                                <option value="XS">XS</option>
+                                <option value="S">S</option>
+                                <option value="M">M</option>
+                                <option value="L">L</option>
+                                <option value="XL">XL</option>
+                                <option value="XXL">XXL</option>
+                                <option value="Mixto">Tallas Mixtas</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="color">Color</label>
+                            <input type="text" id="color" placeholder="Color del producto">
+                        </div>
+                        <div class="form-group">
+                            <label for="status">Estado *</label>
+                            <select id="status" required>
+                                <option value="pending">Pendiente</option>
+                                <option value="priority">Prioritario</option>
+                                <option value="completed">Completado</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="dueDate">Fecha de Entrega *</label>
+                            <input type="date" id="dueDate" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="price">Precio Unitario</label>
+                            <input type="number" id="price" step="0.01" placeholder="0.00">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="notes">Notas Adicionales</label>
+                        <textarea id="notes" placeholder="Especificaciones especiales, diseños, etc."></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        Agregar Producto
+                    </button>
+                </form>
+
+                <h3 class="section-title" style="margin-top: 40px;">
+                    <i class="fas fa-list"></i>
+                    Inventario de Productos
+                </h3>
+
+                <div class="search-filter">
+                    <input type="text" id="searchInput" placeholder="Buscar por cliente, producto o estado...">
+                    <i class="fas fa-search"></i>
+                </div>
+                
+                <div class="inventory-list" id="inventoryList">
+                </div>
+            </div>
+
+            <div class="section quick-actions">
+                <h3 class="section-title">
+                    <i class="fas fa-bolt"></i>
+                    Acciones Rápidas
+                </h3>
+                
+                <div class="action-grid">
+                    <div class="action-card action-export" onclick="exportToCSV()">
+                        <i class="fas fa-download" style="font-size: 2rem; margin-bottom: 10px;"></i>
+                        <h4>Exportar Datos</h4>
+                        <p>Descargar inventario en CSV</p>
+                    </div>
+                    
+                    <div class="action-card action-report" onclick="generateMonthlyReport()">
+                        <i class="fas fa-calendar-alt" style="font-size: 2rem; margin-bottom: 10px;"></i>
+                        <h4>Reporte Mensual</h4>
+                        <p>Ingresos y estadísticas</p>
+                    </div>
+
+                    <div class="action-card action-history" onclick="showSalesHistory()">
+                        <i class="fas fa-history" style="font-size: 2rem; margin-bottom: 10px;"></i>
+                        <h4>Historial</h4>
+                        <p>Ver ventas pasadas</p>
+                    </div>
+                    
+                    <div class="action-card action-backup" onclick="backupData()">
+                        <i class="fas fa-database" style="font-size: 2rem; margin-bottom: 10px;"></i>
+                        <h4>Respaldo</h4>
+                        <p>Guardar copia de seguridad</p>
+                    </div>
+
+                    <div class="action-card action-history" onclick="clearHistory()">
+                        <i class="fas fa-trash-alt" style="font-size: 2rem; margin-bottom: 10px;"></i>
+                        <h4>Limpiar Historial</h4>
+                        <p>Borrar todas las ventas</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="confirmModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="confirmTitle">Confirmar acción</h3>
+            </div>
+            <div class="modal-body">
+                <p id="confirmMessage">¿Estás seguro de que deseas realizar esta acción?</p>
+            </div>
+            <div class="modal-actions">
+                <button id="confirmCancel" class="btn btn-secondary">Cancelar</button>
+                <button id="confirmAccept" class="btn btn-danger">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="database.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
