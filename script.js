@@ -27,6 +27,8 @@ async function loadData() {
 function setupEventListeners() {
     const form = document.getElementById('productForm');
     const searchInput = document.getElementById('searchInput');
+    const productTypeSelect = document.getElementById('productType'); 
+
     
     if (form) {
         form.addEventListener('submit', addProduct);
@@ -36,6 +38,64 @@ function setupEventListeners() {
     if (searchInput) {
         searchInput.addEventListener('input', filterInventory);
     }
+
+    if (productTypeSelect) {
+        productTypeSelect.addEventListener('change', updateSizeOptions);
+    }
+}
+
+function updateSizeOptions() {
+    const productType = document.getElementById('productType').value;
+    const sizeSelect = document.getElementById('size');
+    
+    // Limpiar opciones actuales
+    sizeSelect.innerHTML = '<option value="">Seleccionar talla</option>';
+    
+    // Definir las opciones según el tipo de producto
+    let sizeOptions = [];
+    
+    if (productType.includes('Gorra')) {
+        sizeOptions = [
+            { value: 'Unitalla', text: 'Unitalla (ajustable 54-60cm)' }
+        ];
+    } else if (productType.includes('Tulas Deportivas')) {
+        sizeOptions = [
+            { value: 'Pequeña', text: 'Pequeña (10-15L)' },
+            { value: 'Mediana', text: 'Mediana (15-18L)' },
+            { value: 'Grande', text: 'Grande (18L+)' }
+        ];
+    } else if (productType.includes('Morrales')) {
+        sizeOptions = [
+            { value: 'Pequeño', text: 'Pequeño (38x28x14cm - 15L)' },
+            { value: 'Mediano', text: 'Mediano (44x30x16cm - 20-25L)' },
+            { value: 'Grande', text: 'Grande (48x32x18cm - 30L+)' }
+        ];
+    } else if (productType.includes('Tote Bags')) {
+        sizeOptions = [
+            { value: 'Pequeña', text: 'Pequeña (25x30cm)' },
+            { value: 'Mediana', text: 'Mediana (35x40cm)' },
+            { value: 'Grande', text: 'Grande (40x45cm+)' }
+        ];
+    } else {
+        // Para camisetas y productos textiles normales
+        sizeOptions = [
+            { value: 'XS', text: 'XS' },
+            { value: 'S', text: 'S' },
+            { value: 'M', text: 'M' },
+            { value: 'L', text: 'L' },
+            { value: 'XL', text: 'XL' },
+            { value: 'XXL', text: 'XXL' },
+            { value: 'Mixto', text: 'Tallas Mixtas' }
+        ];
+    }
+    
+    // Agregar las opciones al select
+    sizeOptions.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option.value;
+        optionElement.textContent = option.text;
+        sizeSelect.appendChild(optionElement);
+    });
 }
 
 function setMinDate() {
@@ -672,6 +732,10 @@ function renderInventory() {
                         <div class="item-detail-label">Fecha Entrega</div>
                         <div class="item-detail-value">${formatDate(item.due_date)}</div>
                     </div>
+                    <div class="item-detail">
+                        <div class="item-detail-label">Fecha Entrega</div>
+                        <div class="item-detail-value">${formatDate(item.due_date)}</div>
+                    </div>
                     <div class="item-detail ${isOverdue ? 'overdue' : isUrgent ? 'urgent' : ''}">
                         <div class="item-detail-label">Días Restantes</div>
                         <div class="item-detail-value">
@@ -1138,115 +1202,571 @@ async function generateMonthlyReport() {
         const currentMonth = now.getMonth() + 1;
         const currentYear = now.getFullYear();
         
-        console.log(`Generando reporte para ${currentMonth}/${currentYear}`);
+        console.log(`Generando reporte PDF para ${currentMonth}/${currentYear}`);
+        
+        showNotification('Generando reporte PDF...', 'info');
         
         const monthlyData = await Database.getMonthlyReport(currentYear, currentMonth);
+        const currentData = inventory.map(item => ({
+            ...item,
+            action: item.status === 'completed' ? 'completed' : 'pending',
+            total_value: item.price * item.quantity,
+            client_name: item.client_name,
+            product_type: item.product_type,
+            quantity_completed: item.quantity_completed,
+            quantity: item.quantity
+        }));
+
+        const allData = [...(monthlyData || []), ...currentData];
         console.log('Datos mensuales obtenidos:', monthlyData);
         
-        if (!monthlyData || monthlyData.length === 0) {
-            console.log('No hay datos archivados, generando reporte con datos actuales...');
-            
-            const currentStats = {
-                totalOrdenes: inventory.length,
-                totalIngresos: inventory.reduce((sum, item) => sum + (item.price * item.quantity), 0),
-                totalPrendas: inventory.reduce((sum, item) => sum + item.quantity, 0),
-                prendasCompletadas: inventory.reduce((sum, item) => sum + item.quantity_completed, 0),
-                clientesActivos: [...new Set(inventory.map(item => item.client_name))].length
-            };
-            
-            const report = `
-=== REPORTE MENSUAL ${currentMonth}/${currentYear} ===
-REG MARKETING S.A.S
-
-📊 DATOS ACTUALES (SIN HISTORIAL ARCHIVADO):
-💰 Valor total en órdenes actuales: $${currentStats.totalIngresos.toLocaleString()}
-👕 Prendas en proceso: ${currentStats.prendasCompletadas}/${currentStats.totalPrendas}
-📋 Órdenes activas: ${currentStats.totalOrdenes}
-👥 Clientes activos: ${currentStats.clientesActivos}
-
-⚠️  NOTA: Este reporte muestra datos actuales ya que no hay historial 
-de ventas completadas para ${currentMonth}/${currentYear}.
-
-Para generar reportes con ingresos reales, completa algunos pedidos
-y vuelve a generar el reporte.
-
-ÓRDENES ACTUALES POR CLIENTE:
-${inventory.map(item => 
-    `• ${item.client_name}: ${item.product_type} - ${item.quantity_completed}/${item.quantity} completadas - $${(item.price * item.quantity).toLocaleString()}`
-).join('\n')}
-            `;
-            
-            downloadReport(report, `REG_Marketing_Actual_${currentMonth}_${currentYear}.txt`);
-            showNotification('Reporte generado con datos actuales (sin historial)', 'info');
-            return;
-        }
-        
-        const totalIngresos = monthlyData.reduce((sum, item) => sum + (item.total_value || 0), 0);
-        const totalPrendas = monthlyData.reduce((sum, item) => sum + (item.quantity_completed || 0), 0);
-        const totalClientes = [...new Set(monthlyData.map(item => item.client_name))].length;
-        const completedOrders = monthlyData.filter(item => item.action === 'completed').length;
-        const deletedOrders = monthlyData.filter(item => item.action === 'deleted').length;
-        
-        const clienteStats = monthlyData.reduce((acc, item) => {
-            if (!acc[item.client_name]) {
-                acc[item.client_name] = { value: 0, quantity: 0, orders: 0 };
-            }
-            acc[item.client_name].value += item.total_value || 0;
-            acc[item.client_name].quantity += item.quantity_completed || 0;
-            acc[item.client_name].orders += 1;
-            return acc;
-        }, {});
-        
-        const ventasPorCliente = Object.entries(clienteStats)
-            .sort((a, b) => b[1].value - a[1].value)
-            .map(([cliente, stats]) => `• ${cliente}: $${stats.value.toLocaleString()} (${stats.quantity} prendas, ${stats.orders} órdenes)`)
-            .join('\n');
-        
-        const productStats = monthlyData.reduce((acc, item) => {
-            if (item.action === 'completed') {
-                acc[item.product_type] = (acc[item.product_type] || 0) + (item.quantity_completed || 0);
-            }
-            return acc;
-        }, {});
-        
-        const productosMasVendidos = Object.entries(productStats)
-            .sort((a, b) => b[1] - a[1])
-            .map(([product, qty]) => `• ${product}: ${qty} unidades`)
-            .join('\n');
-        
-        const report = `
-=== REPORTE MENSUAL ${currentMonth}/${currentYear} ===
-REG MARKETING S.A.S
-
-RESUMEN FINANCIERO:
-💰 Ingresos totales: $${totalIngresos.toLocaleString()}
-👕 Prendas completadas: ${totalPrendas}
-👥 Clientes atendidos: ${totalClientes}
-📊 Ticket promedio: $${totalClientes > 0 ? Math.round(totalIngresos/totalClientes).toLocaleString() : 0}
-
-ACTIVIDAD DEL MES:
-✅ Órdenes completadas: ${completedOrders}
-❌ Órdenes eliminadas: ${deletedOrders}
-📈 Total procesadas: ${monthlyData.length}
-
-VENTAS POR CLIENTE:
-${ventasPorCliente || 'Sin datos de clientes'}
-
-PRODUCTOS MÁS VENDIDOS:
-${productosMasVendidos || 'Sin productos completados'}
-
-Generado el: ${new Date().toLocaleString()}
-        `;
-        
-        downloadReport(report, `REG_Marketing_Mensual_${currentMonth}_${currentYear}.txt`);
-        showNotification('Reporte mensual generado exitosamente', 'success');
+        await createProfessionalPDF(allData, currentMonth, currentYear);    
         
     } catch (error) {
-        console.error('Error generando reporte mensual:', error);
-        showNotification('Error al generar reporte mensual: ' + error.message, 'error');
+        console.error('Error generando reporte PDF:', error);
+        showNotification('Error al generar reporte PDF: ' + error.message, 'error');
+    }
+}
+function loadLogoImage() {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = function() {
+            console.log('No se pudo cargar logo.png, usando logo por defecto');
+            resolve(null);
+        };
+        img.src = 'logo.png';
+    });
+}
+
+async function createProfessionalPDF(monthlyData, currentMonth, currentYear) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('portrait', 'mm', 'a4');
+    
+    const logoDataUrl = await loadLogoImage();
+    
+    const colors = {
+        primary: [33, 150, 243],
+        dark: [25, 118, 210],
+        success: [76, 175, 80],
+        warning: [255, 152, 0],
+        danger: [244, 67, 54],
+        gray: [117, 117, 117],
+        lightGray: [245, 245, 245],
+        white: [255, 255, 255],
+        black: [33, 33, 33]
+    };
+    
+    const pageWidth = 210;
+    const margins = { left: 20, right: 20 };
+    const contentWidth = pageWidth - margins.left - margins.right;
+    
+    createProfessionalHeader(doc, logoDataUrl, colors, currentMonth, currentYear);
+
+    let currentY = 65;
+    
+    if (!monthlyData || (monthlyData.length === 0 && inventory.length === 0)) {
+        await createCurrentDataReport(doc, currentY, colors, margins, contentWidth);
+    } else {
+        await createHistoricalReport(doc, monthlyData, currentY, colors, margins, contentWidth, currentMonth, currentYear);
+    }
+    
+    addProfessionalFooter(doc, colors, pageWidth);
+    
+    const filename = `REG_Marketing_Reporte_${getMonthName(currentMonth)}_${currentYear}.pdf`;
+    doc.save(filename);
+    
+    if (isMobileDevice()) {
+        setTimeout(() => {
+            showMobileDownloadInstructions('El reporte PDF se ha generado y está listo para descarga.');
+        }, 1000);
+    }
+    
+    showNotification('Reporte PDF generado exitosamente', 'success');
+}
+
+async function createCurrentDataReport(doc, startY, colors, margins, contentWidth) {
+    let currentY = startY;
+    
+    doc.setFillColor(...colors.warning);
+    doc.roundedRect(margins.left, currentY, contentWidth, 15, 3, 3, 'F');
+    doc.setTextColor(...colors.white);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('DATOS ACTUALES DEL SISTEMA', margins.left + 8, currentY + 10);
+    
+    currentY += 25;
+    doc.setTextColor(...colors.black);
+    
+    const currentStats = {
+        totalOrdenes: inventory.length,
+        totalIngresos: inventory.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+        totalPrendas: inventory.reduce((sum, item) => sum + item.quantity, 0),
+        prendasCompletadas: inventory.reduce((sum, item) => sum + item.quantity_completed, 0),
+        clientesActivos: [...new Set(inventory.map(item => item.client_name))].length
+    };
+    
+    const kpis = [
+        { 
+            label: 'Valor Total en Ordenes', 
+            value: `$${currentStats.totalIngresos.toLocaleString()}`, 
+            color: colors.success
+        },
+        { 
+            label: 'Ordenes Activas', 
+            value: currentStats.totalOrdenes.toString(), 
+            color: colors.primary
+        },
+        { 
+            label: 'Prendas en Proceso', 
+            value: `${currentStats.prendasCompletadas}/${currentStats.totalPrendas}`, 
+            color: colors.warning
+        },
+        { 
+            label: 'Clientes Activos', 
+            value: currentStats.clientesActivos.toString(), 
+            color: colors.danger
+        }
+    ];
+    
+    const cardWidth = (contentWidth - 15) / 2;
+    const cardHeight = 30; 
+    
+    for (let i = 0; i < kpis.length; i++) {
+        const kpi = kpis[i];
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+        const x = margins.left + col * (cardWidth + 5);
+        const y = currentY + row * (cardHeight + 8);
+        
+        doc.setFillColor(220, 220, 220);
+        doc.roundedRect(x + 2, y + 2, cardWidth, cardHeight, 5, 5, 'F');
+        
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(x, y, cardWidth, cardHeight, 5, 5, 'F');
+        
+        
+        doc.setFillColor(...kpi.color);
+        doc.roundedRect(x, y, cardWidth, 5, 5, 5, 'F');
+        doc.rect(x, y + 3, cardWidth, 2, 'F');
+        
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...kpi.color);
+        doc.text(kpi.value, x + 8, y + 16);
+        
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...colors.gray);
+        doc.text(kpi.label, x + 8, y + 24);
+    }
+    
+    currentY += 75;
+    
+    if (inventory.length > 0) {
+        doc.setFillColor(...colors.primary);
+        doc.roundedRect(margins.left, currentY, contentWidth, 12, 3, 3, 'F');
+        doc.setTextColor(...colors.white);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('ORDENES ACTUALES EN SISTEMA', margins.left + 8, currentY + 8);
+        
+        currentY += 20;
+        
+        for (let index = 0; index < Math.min(inventory.length, 12); index++) {
+            const item = inventory[index];
+            if (currentY > 240) {
+                doc.addPage();
+                createProfessionalHeader(doc, await loadLogoImage(), colors, currentMonth, currentYear);
+                currentY = 70;
+            }
+            
+            const progress = `${item.quantity_completed}/${item.quantity}`;
+            const progressPercent = Math.round((item.quantity_completed / item.quantity) * 100);
+            const value = `$${(item.price * item.quantity).toLocaleString()}`;
+            
+            if (index % 2 === 0) {
+                doc.setFillColor(248, 249, 250);
+                doc.roundedRect(margins.left, currentY - 2, contentWidth, 12, 2, 2, 'F');
+            }
+            
+            const statusColor = item.status === 'completed' ? colors.success : 
+                              item.status === 'priority' ? colors.danger : colors.warning;
+            doc.setFillColor(...statusColor);
+            doc.circle(margins.left + 4, currentY + 4, 2, 'F');
+            
+            doc.setTextColor(...colors.black);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.text(`${item.client_name}`, margins.left + 10, currentY + 3);
+            
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(...colors.gray);
+            doc.setFontSize(8);
+            doc.text(`${item.product_type} - ${progress} (${progressPercent}%) - ${value}`, margins.left + 10, currentY + 8);
+            
+            currentY += 14;
+        };
+        
+        if (inventory.length > 12) {
+            doc.setTextColor(...colors.gray);
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'italic');
+            doc.text(`... y ${inventory.length - 12} ordenes mas en el sistema`, margins.left + 10, currentY + 5);
+            currentY += 15;
+        }
+    }
+    
+    currentY += 10;
+    doc.setFillColor(255, 248, 225);
+    doc.roundedRect(margins.left, currentY, contentWidth, 25, 5, 5, 'F');
+    
+    doc.setFillColor(...colors.warning);
+    doc.roundedRect(margins.left, currentY, 4, 25, 5, 5, 'F');
+    
+    doc.setTextColor(...colors.black);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('NOTA IMPORTANTE', margins.left + 10, currentY + 8);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...colors.gray);
+    const noteText = 'Este reporte muestra datos actuales del sistema. Para generar reportes con historial de ventas reales, complete algunos pedidos y vuelva a generar el reporte mensual.';
+    const splitNote = doc.splitTextToSize(noteText, contentWidth - 20);
+    doc.text(splitNote, margins.left + 10, currentY + 15);
+}
+
+async function createHistoricalReport(doc, allData, startY, colors, margins, contentWidth, currentMonth, currentYear) {
+    let currentY = startY;
+    
+    const totalIngresos = allData.reduce((sum, item) => sum + (item.total_value || 0), 0);
+    const totalPrendas = allData.reduce((sum, item) => sum + (item.quantity_completed || 0), 0);
+    const totalClientes = [...new Set(allData.map(item => item.client_name))].length;
+    const completedOrders = allData.filter(item => item.action === 'completed').length;
+    const pendingOrders = allData.filter(item => item.action === 'pending').length;
+    const deletedOrders = allData.filter(item => item.action === 'deleted').length;
+    
+    doc.setFillColor(...colors.success);
+    doc.roundedRect(margins.left, currentY, contentWidth, 15, 3, 3, 'F');
+    doc.setTextColor(...colors.white);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RESUMEN FINANCIERO DEL MES', margins.left + 8, currentY + 10);
+    
+    currentY += 25;
+    
+    const financialKPIs = [
+        { 
+            label: 'Ingresos Totales', 
+            value: `$${totalIngresos.toLocaleString()}`, 
+            color: colors.success
+        },
+        { 
+            label: 'Prendas Completadas', 
+            value: totalPrendas.toString(), 
+            color: colors.primary
+        },
+        { 
+            label: 'Clientes Atendidos', 
+            value: totalClientes.toString(), 
+            color: colors.warning
+        },
+        { 
+            label: 'Ingreso Promedio por Cliente', 
+            value: `$${totalClientes > 0 ? Math.round(totalIngresos/totalClientes).toLocaleString() : 0}`, 
+            color: colors.danger
+        }
+    ];
+    
+    createKPICards(doc, financialKPIs, currentY, colors, margins, contentWidth);
+    currentY += 75;
+    
+    doc.setFillColor(...colors.primary);
+    doc.roundedRect(margins.left, currentY, contentWidth, 12, 3, 3, 'F');
+    doc.setTextColor(...colors.white);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('ACTIVIDAD DEL MES', margins.left + 8, currentY + 8);
+    
+    currentY += 20;
+    
+    const activityStats = [
+        { label: 'Ordenes Completadas', value: completedOrders, color: colors.success },
+        { label: 'Ordenes Pendientes', value: pendingOrders, color: colors.warning },
+        { label: 'Ordenes Eliminadas', value: deletedOrders, color: colors.danger },
+        { label: 'Total en Sistema', value: allData.length, color: colors.primary }
+    ];
+    
+    activityStats.forEach((stat, index) => {
+        const y = currentY + (index * 15);
+        
+        doc.setFillColor(248, 249, 250);
+        doc.roundedRect(margins.left, y, contentWidth, 12, 2, 2, 'F');
+        
+        doc.setFillColor(...stat.color);
+        doc.roundedRect(margins.left, y, 4, 12, 2, 2, 'F');
+        
+        doc.setTextColor(...colors.black);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`${stat.label}:`, margins.left + 10, y + 8);
+        
+        doc.setTextColor(...stat.color);
+        doc.setFont('helvetica', 'bold');
+        doc.text(stat.value.toString(), margins.left + 80, y + 8);
+    });
+    
+    currentY += 55;
+    
+    const clienteStats = allData.reduce((acc, item) => {
+        if (!acc[item.client_name]) {
+            acc[item.client_name] = { value: 0, quantity: 0, orders: 0 };
+        }
+        acc[item.client_name].value += item.total_value || 0;
+        acc[item.client_name].quantity += item.quantity_completed || 0;
+        acc[item.client_name].orders += 1;
+        return acc;
+    }, {});
+    
+    const topClientes = Object.entries(clienteStats)
+        .sort((a, b) => b[1].value - a[1].value)
+        .slice(0, 8);
+    
+    if (topClientes.length > 0) {
+        const requiredSpace = 32 + (topClientes.length * 12); 
+        if (currentY + requiredSpace > 250) {
+            doc.addPage();
+            createProfessionalHeader(doc, await loadLogoImage(), colors, currentMonth, currentYear);
+            currentY = 70;
+        }
+        
+        doc.setFillColor(...colors.warning);
+        doc.roundedRect(margins.left, currentY, contentWidth, 12, 3, 3, 'F');
+        doc.setTextColor(...colors.white);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('CLIENTES DEL MES', margins.left + 8, currentY + 8);
+        
+        currentY += 20;
+        
+        for (let index = 0; index < topClientes.length; index++) {
+            const cliente = topClientes[index];
+            if (currentY > 250) {
+                doc.addPage();
+                createProfessionalHeader(doc, await loadLogoImage(), colors, new Date().getMonth() + 1, new Date().getFullYear());
+                currentY = 70;
+            }
+            
+            const [nombre, stats] = cliente;
+            const y = currentY + (index * 12);
+            
+            const clienteCompletado = allData.filter(item => 
+                item.client_name === nombre && item.action === 'completed'
+            ).length > 0;
+            const clientePendiente = allData.filter(item => 
+                item.client_name === nombre && item.action === 'pending'
+            ).length > 0;
+
+            const circleColor = clienteCompletado && !clientePendiente ? colors.success : 
+                            clientePendiente ? colors.danger : colors.primary;
+
+            doc.setFillColor(...circleColor);
+            doc.circle(margins.left + 5, y + 4, 3, 'F');
+            doc.setTextColor(...colors.white);
+            doc.setFontSize(8);
+            doc.setFont('helvetica', 'bold');
+
+            const rankNumber = `${index + 1}`;
+            const numberWidth = doc.getTextWidth(rankNumber);
+            doc.text(rankNumber, margins.left + 5 - (numberWidth / 2), y + 5.2);
+            
+            doc.setTextColor(...colors.black);
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.text(nombre, margins.left + 15, y + 4);
+            
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(...colors.gray);
+            doc.text(`$${stats.value.toLocaleString()} - ${stats.quantity} prendas - ${stats.orders} ordenes`, margins.left + 15, y + 8);
+        };
+        
+        currentY += (topClientes.length * 12) + 10;
+
+        const hasPendingClients = allData.some(item => item.action === 'pending');
+
+        if (hasPendingClients) {
+            currentY += 10;
+            doc.setFillColor(255, 248, 225);
+            doc.roundedRect(margins.left, currentY, contentWidth, 25, 5, 5, 'F');
+            
+            doc.setFillColor(...colors.warning);
+            doc.roundedRect(margins.left, currentY, 4, 25, 5, 5, 'F');
+            
+            doc.setTextColor(...colors.black);
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.text('NOTA IMPORTANTE', margins.left + 10, currentY + 8);
+            
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(...colors.gray);
+            const noteText = 'Hay clientes con ordenes pendientes marcados en rojo. Complete estos pedidos para actualizar el estado en futuros reportes.';
+            const splitNote = doc.splitTextToSize(noteText, contentWidth - 20);
+            doc.text(splitNote, margins.left + 10, currentY + 15);
+        }
+        }
+}
+
+function createKPICards(doc, kpis, startY, colors, margins, contentWidth) {
+    const cardWidth = (contentWidth - 15) / 2;
+    const cardHeight = 25;
+    
+    for (let i = 0; i < kpis.length; i++) {
+        const kpi = kpis[i];
+        const col = i % 2;
+        const row = Math.floor(i / 2);
+        const x = margins.left + col * (cardWidth + 5);
+        const y = startY + row * (cardHeight + 5);
+        
+        doc.setFillColor(200, 200, 200);
+        doc.roundedRect(x + 1, y + 1, cardWidth, cardHeight, 3, 3, 'F');
+        
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(x, y, cardWidth, cardHeight, 3, 3, 'F');
+        
+        doc.setFillColor(...kpi.color);
+        doc.roundedRect(x, y, cardWidth, 4, 3, 3, 'F');
+        doc.rect(x, y + 2, cardWidth, 2, 'F');
+        
+        doc.setFontSize(18);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...kpi.color);
+        doc.text(kpi.value, x + 8, y + 14);
+        
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...colors.gray);
+        doc.text(kpi.label, x + 8, y + 20);
     }
 }
 
+function createProfessionalHeader(doc, logoDataUrl, colors, currentMonth, currentYear) {
+    doc.setFillColor(248, 249, 250); 
+    doc.rect(0, 0, 210, 55, 'F');
+    
+    doc.setFillColor(...colors.primary);
+    doc.rect(0, 0, 210, 3, 'F');
+    
+    const logoX = 15;
+    const logoY = 12;
+    const logoSize = 30;
+    
+    doc.setFillColor(200, 200, 200); 
+    doc.circle(logoX + logoSize/2 + 1, logoY + logoSize/2 + 1, logoSize/2 + 2, 'F');
+    
+    doc.setFillColor(255, 255, 255); 
+    doc.circle(logoX + logoSize/2, logoY + logoSize/2, logoSize/2 + 2, 'F');
+    
+    if (logoDataUrl) {
+        try {
+            doc.addImage(logoDataUrl, 'PNG', logoX + 3, logoY + 3, logoSize - 6, logoSize - 6);
+        } catch (error) {
+            console.log('Error agregando logo:', error);
+            doc.setTextColor(...colors.primary);
+            doc.setFontSize(14);
+            doc.setFont('helvetica', 'bold');
+            const textWidth = doc.getTextWidth('REG');
+            doc.text('REG', logoX + logoSize/2 - textWidth/2, logoY + logoSize/2 + 3);
+        }
+    } else {
+        doc.setTextColor(...colors.primary);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        const textWidth = doc.getTextWidth('REG');
+        doc.text('REG', logoX + logoSize/2 - textWidth/2, logoY + logoSize/2 + 3);
+    }
+    
+    const companyX = logoX + logoSize + 12; 
+    
+    doc.setTextColor(...colors.black);
+    doc.setFontSize(18); 
+    doc.setFont('helvetica', 'bold');
+    doc.text('REG MARKETING', companyX, logoY + 10);
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...colors.gray);
+    doc.text('S.A.S', companyX, logoY + 18);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(...colors.gray);
+    doc.text('Sistema Profesional de Gestion Textil', companyX, logoY + 26);
+    
+    const reportX = 130;
+    
+    doc.setFillColor(...colors.primary);
+    doc.roundedRect(reportX, logoY, 65, 20, 3, 3, 'F');
+    
+    doc.setTextColor(...colors.white);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    const reportTitle = `REPORTE MENSUAL`;
+    const titleWidth = doc.getTextWidth(reportTitle);
+    doc.text(reportTitle, reportX + (65 - titleWidth)/2, logoY + 8);
+    
+    doc.setFontSize(11);
+    const monthYear = `${getMonthName(currentMonth)} ${currentYear}`;
+    const monthWidth = doc.getTextWidth(monthYear);
+    doc.text(monthYear, reportX + (65 - monthWidth)/2, logoY + 16);
+    
+    doc.setTextColor(...colors.gray);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    const generateDate = `Generado: ${new Date().toLocaleDateString('es-ES')}`;
+    doc.text(generateDate, reportX, logoY + 26);
+    
+    doc.setDrawColor(...colors.lightGray);
+    doc.setLineWidth(0.5);
+    doc.line(15, 52, 195, 52);
+}
+
+function addProfessionalFooter(doc, colors, pageWidth) {
+    const footerY = 285; 
+    
+    doc.setFillColor(...colors.primary);
+    doc.rect(20, footerY, 170, 1, 'F');
+    
+    doc.setTextColor(...colors.gray);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('REG MARKETING S.A.S - Sistema Profesional de Gestion Textil', 20, footerY + 8);
+    doc.text('Generado automaticamente por el sistema de gestion', 20, footerY + 13);
+    
+    const currentDate = new Date().toLocaleString('es-ES');
+    const dateWidth = doc.getTextWidth(`Fecha: ${currentDate}`);
+    doc.text(`Fecha: ${currentDate}`, pageWidth - 20 - dateWidth, footerY + 8);
+    
+    const pageText = 'Pagina 1';
+    const pageWidth2 = doc.getTextWidth(pageText);
+    doc.text(pageText, pageWidth - 20 - pageWidth2, footerY + 13);
+}
+
+function getMonthName(monthNumber) {
+    const months = [
+        'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    return months[monthNumber - 1];
+}
 function downloadReport(content, filename) {
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
     const link = document.createElement('a');
@@ -1348,6 +1868,5 @@ async function clearHistory() {
         }
     );
 }
-
 
 document.addEventListener('DOMContentLoaded', init);
