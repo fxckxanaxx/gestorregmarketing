@@ -1,15 +1,31 @@
 let inventory = [];
 let filteredInventory = [];
 let editingId = null;
+let currentOrder = {
+    clientName: '',
+    items: [],
+    isActive: false
+};
 
 async function init() {
     console.log('Inicializando aplicación...');
     await loadData();
-    renderInventory();
+    await renderInventory();
     updateStats();
     setupEventListeners();
     setMinDate();
     showNotification('Sistema iniciado correctamente', 'success');
+
+    const sizeSelect = document.getElementById('size');
+    if (sizeSelect) {
+        sizeSelect.addEventListener('change', toggleMixedSizes);
+    }
+
+    const sizeInputs = document.querySelectorAll('.size-input');
+    sizeInputs.forEach(input => {
+        input.addEventListener('input', updateMixedSizesTotal);
+        input.addEventListener('change', updateMixedSizesTotal);
+    });
 }
 
 async function loadData() {
@@ -48,10 +64,21 @@ function updateSizeOptions() {
     const productType = document.getElementById('productType').value;
     const sizeSelect = document.getElementById('size');
     
-    // Limpiar opciones actuales
     sizeSelect.innerHTML = '<option value="">Seleccionar talla</option>';
     
-    // Definir las opciones según el tipo de producto
+    const clothingProducts = [
+        'Camisetas de algodón estampadas',
+        'Camisetas tipo polo bordadas', 
+        'Camisetas sublimadas',
+        'Camiseta Manga Larga',
+        'Chaleco en drill',
+        'Jean dotación',
+        'Camisas Oxford',
+        'Chaqueta',
+        'Hoodie college',
+        'Uniforme'
+    ];
+    
     let sizeOptions = [];
     
     if (productType.includes('Gorra')) {
@@ -76,8 +103,7 @@ function updateSizeOptions() {
             { value: 'Mediana', text: 'Mediana (35x40cm)' },
             { value: 'Grande', text: 'Grande (40x45cm+)' }
         ];
-    } else {
-        // Para camisetas y productos textiles normales
+    } else if (clothingProducts.includes(productType)) {
         sizeOptions = [
             { value: 'XS', text: 'XS' },
             { value: 'S', text: 'S' },
@@ -85,11 +111,14 @@ function updateSizeOptions() {
             { value: 'L', text: 'L' },
             { value: 'XL', text: 'XL' },
             { value: 'XXL', text: 'XXL' },
-            { value: 'Mixto', text: 'Tallas Mixtas' }
+            { value: 'MIXTAS', text: 'Tallas Mixtas (Especificar cantidad por talla)' }
+        ];
+    } else {
+        sizeOptions = [
+            { value: 'UNICA', text: 'Talla Única' }
         ];
     }
     
-    // Agregar las opciones al select
     sizeOptions.forEach(option => {
         const optionElement = document.createElement('option');
         optionElement.value = option.value;
@@ -129,38 +158,69 @@ async function addProduct(event) {
         const price = parseFloat(document.getElementById('price').value) || 0;
         const notes = document.getElementById('notes').value.trim() || '';
 
-        if (!clientName || !productType || !quantity || !dueDate) {
-            showNotification('Por favor completa todos los campos obligatorios', 'error');
+        let sizeDistribution = null;
+        if (size === 'MIXTAS') {
+            if (!validateMixedSizes()) {
+                return;
+            }
+            sizeDistribution = getMixedSizesDistribution();
+            if (Object.keys(sizeDistribution).length === 0) {
+                showNotification('Debes especificar cantidades para las tallas mixtas', 'error');
+                return;
+            }
+        } else if (!quantity || quantity <= 0) {
+            showNotification('La cantidad debe ser mayor a 0', 'error');
             return;
         }
 
-        const productData = {
-            clientName,
+        if (!currentOrder.isActive) {
+            currentOrder = {
+                clientName: clientName,
+                items: [],
+                isActive: true,
+                status: status,
+                dueDate: dueDate
+            };
+        } else if (currentOrder.clientName !== clientName) {
+            const shouldFinalize = await showAsyncConfirm(
+                'Pedido en proceso',
+                `Tienes un pedido en proceso para ${currentOrder.clientName}. ¿Quieres finalizarlo antes de crear uno para ${clientName}?`
+            );
+            
+            if (shouldFinalize) {
+                await finalizeCurrentOrder();
+                currentOrder = {
+                    clientName: clientName,
+                    items: [],
+                    isActive: true,
+                    status: status,
+                    dueDate: dueDate
+                };
+            } else {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+        }
+
+        const newItem = {
             productType,
             quantity,
             size,
+            sizeDistribution: sizeDistribution ? JSON.stringify(sizeDistribution) : null,
             color,
-            status,
-            dueDate,
             price,
-            notes
+            notes,
+            tempId: Date.now() + Math.random()
         };
 
-        if (editingId) {
-            await Database.updateProduct(editingId, productData);
-            showNotification('Producto actualizado exitosamente', 'success');
-            resetForm();
-        } else {
-            await Database.addProduct(productData);
-            showNotification('Producto agregado exitosamente', 'success');
-        }
-
-        await loadData();
-        renderInventory();
-        updateStats();
+        currentOrder.items.push(newItem);
         
-        document.getElementById('productForm').reset();
-        setMinDate();
+        showCurrentOrder();
+        
+        clearProductForm();
+        
+        showNotification(`Producto agregado al pedido de ${clientName}`, 'success');
         
     } catch (error) {
         console.error('Error procesando producto:', error);
@@ -204,6 +264,10 @@ function updateStats() {
     updateClientInsights();
     
     updateProductAnalytics();
+}
+
+function getCompletedBySizeSync(orderId, size) {
+    return 0;
 }
 
 function calculateAverageDeliveryTime() {
@@ -664,8 +728,33 @@ function updateElement(id, value) {
     }
 }
 
-function renderInventory() {
+async function getCompletedForSize(orderId, size) {
+    try {
+        return await Database.getCompletedBySizeForOrder(orderId, size);
+    } catch (error) {
+        console.error('Error:', error);
+        return 0;
+    }
+}
+
+async function renderInventory() {
     const inventoryList = document.getElementById('inventoryList');
+
+    const sizeProgressData = {};
+    for (const item of filteredInventory) {
+        if (item.size === 'MIXTAS' && item.size_distribution) {
+            try {
+                const distribution = JSON.parse(item.size_distribution);
+                sizeProgressData[item.id] = {};
+                for (const size of Object.keys(distribution)) {
+                    sizeProgressData[item.id][size] = await Database.getCompletedBySizeForOrder(item.id, size);
+                }
+            } catch (e) {
+                console.error('Error pre-cargando datos de talla:', e);
+                sizeProgressData[item.id] = {};
+            }
+        }
+    }
     
     if (!inventoryList) {
         console.error('Elemento inventoryList no encontrado');
@@ -683,104 +772,226 @@ function renderInventory() {
         return;
     }
 
-    inventoryList.innerHTML = filteredInventory.map(item => {
-        const remaining = item.quantity - item.quantity_completed;
-        const progressPercentage = (item.quantity_completed / item.quantity) * 100;
-        const today = new Date();
-        const dueDate = new Date(item.due_date + 'T00:00:00');
-        const diffTime = dueDate - today;
-        const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        const isOverdue = daysRemaining < 0;
-        const isUrgent = daysRemaining <= 3 && daysRemaining >= 0;
+    const groupedByClient = {};
+    filteredInventory.forEach(item => {
+        if (!groupedByClient[item.client_name]) {
+            groupedByClient[item.client_name] = [];
+        }
+        groupedByClient[item.client_name].push(item);
+    });
+
+    inventoryList.innerHTML = Object.entries(groupedByClient).map(([clientName, clientOrders]) => {
+        const totalClientValue = clientOrders.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        const totalClientQuantity = clientOrders.reduce((sum, item) => sum + item.quantity, 0);
+        const totalClientCompleted = clientOrders.reduce((sum, item) => sum + item.quantity_completed, 0);
+        const clientProgressPercentage = totalClientQuantity > 0 ? (totalClientCompleted / totalClientQuantity) * 100 : 0;
         
+        const allCompleted = clientOrders.every(order => order.quantity_completed >= order.quantity);
+        const hasUrgent = clientOrders.some(order => {
+            const dueDate = new Date(order.due_date + 'T00:00:00');
+            const today = new Date();
+            const diffTime = dueDate - today;
+            const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            return daysRemaining <= 3 && daysRemaining >= 0;
+        });
+        const hasOverdue = clientOrders.some(order => {
+            const dueDate = new Date(order.due_date + 'T00:00:00');
+            const today = new Date();
+            const diffTime = dueDate - today;
+            const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            return daysRemaining < 0;
+        });
+
+        const clientStatusClass = allCompleted ? 'client-completed' : 
+                                hasOverdue ? 'client-overdue' : 
+                                hasUrgent ? 'client-urgent' : 'client-normal';
+
         return `
-            <div class="inventory-item">
-                <div class="item-header">
-                    <div class="item-title">${item.client_name}</div>
-                    <div class="item-status ${getStatusClass(item.status)}">${getStatusText(item.status)}</div>
-                </div>
-                
-                <!-- BARRA DE PROGRESO -->
-                <div class="progress-section">
-                    <div class="progress-info">
-                        <span><strong>Progreso:</strong> ${item.quantity_completed}/${item.quantity} (${Math.round(progressPercentage)}%)</span>
-                        <span class="remaining"><strong>Restantes:</strong> ${remaining}</span>
-                    </div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${progressPercentage}%"></div>
+            <div class="client-inventory-card ${clientStatusClass}">
+                <!-- HEADER DEL CLIENTE -->
+                <div class="client-header">
+                    <div class="client-title">${clientName}</div>
+                    <div class="client-header-right">
+                        <div class="client-orders-count">${clientOrders.length} pedido${clientOrders.length > 1 ? 's' : ''}</div>
+                        <div class="client-total">Total: $${totalClientValue.toLocaleString()}</div>
+                        ${allCompleted ? '<div class="client-status completed">✅ Completado</div>' : ''}
                     </div>
                 </div>
 
-                <div class="item-details">
-                    <div class="item-detail">
-                        <div class="item-detail-label">Producto</div>
-                        <div class="item-detail-value">${item.product_type}</div>
+                <!-- PROGRESO GENERAL DEL CLIENTE -->
+                <div class="client-progress-section">
+                    <div class="client-progress-info">
+                        <span><strong>Progreso General:</strong> ${totalClientCompleted}/${totalClientQuantity} prendas (${Math.round(clientProgressPercentage)}%)</span>
+                        <span class="client-remaining"><strong>Restantes:</strong> ${totalClientQuantity - totalClientCompleted}</span>
                     </div>
-                    <div class="item-detail">
-                        <div class="item-detail-label">Cantidad Total</div>
-                        <div class="item-detail-value">${item.quantity}</div>
-                    </div>
-                    <div class="item-detail">
-                        <div class="item-detail-label">Talla</div>
-                        <div class="item-detail-value">${item.size}</div>
-                    </div>
-                    <div class="item-detail">
-                        <div class="item-detail-label">Color</div>
-                        <div class="item-detail-value">${item.color}</div>
-                    </div>
-                    <div class="item-detail">
-                        <div class="item-detail-label">Fecha Entrega</div>
-                        <div class="item-detail-value">${formatDate(item.due_date)}</div>
-                    </div>
-                    <div class="item-detail">
-                        <div class="item-detail-label">Fecha Entrega</div>
-                        <div class="item-detail-value">${formatDate(item.due_date)}</div>
-                    </div>
-                    <div class="item-detail ${isOverdue ? 'overdue' : isUrgent ? 'urgent' : ''}">
-                        <div class="item-detail-label">Días Restantes</div>
-                        <div class="item-detail-value">
-                            ${isOverdue ? `${Math.abs(daysRemaining)} días vencido` : 
-                            daysRemaining === 0 ? 'Vence hoy' : 
-                            `${daysRemaining} días`}
-                        </div>
-                    </div>
-                    <div class="item-detail">
-                        <div class="item-detail-label">Precio</div>
-                        <div class="item-detail-value">$${item.price.toLocaleString()}</div>
+                    <div class="client-progress-bar">
+                        <div class="client-progress-fill" style="width: ${clientProgressPercentage}%"></div>
                     </div>
                 </div>
-                
-                ${item.notes ? `<div style="margin-bottom: 15px; padding: 10px; background: var(--white); border-radius: 8px; border-left: 3px solid var(--primary-blue);"><strong>Notas:</strong> ${item.notes}</div>` : ''}
-                
-                <!-- SECCIÓN PARA AGREGAR PROGRESO -->
-                ${remaining > 0 ? `
-                    <div class="add-progress-section">
-                        <div class="progress-input-group">
-                            <input type="number" 
-                                   id="progress-${item.id}" 
-                                   min="1" 
-                                   max="${remaining}" 
-                                   placeholder="Cantidad completada"
-                                   class="progress-input">
-                            <button class="btn btn-success btn-small" onclick="addProgress(${item.id})">
-                                <i class="fas fa-plus"></i> Agregar Progreso
-                            </button>
-                        </div>
+
+                <!-- LISTA DE PEDIDOS DEL CLIENTE -->
+                <div class="client-orders">
+                    ${clientOrders.map(order => {
+                        const remaining = order.quantity - order.quantity_completed;
+                        const progressPercentage = order.size === 'MIXTAS' && order.size_distribution ? 
+                            calculateMixedSizeProgress(order, sizeProgressData) : 
+                            (order.quantity_completed / order.quantity) * 100;
+                        const today = new Date();
+                        const dueDate = new Date(order.due_date + 'T00:00:00');
+                        const diffTime = dueDate - today;
+                        const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        const isOverdue = daysRemaining < 0;
+                        const isUrgent = daysRemaining <= 3 && daysRemaining >= 0;
+                        const isCompleted = remaining === 0;
+
+                        return `
+                            <div class="order-item ${isCompleted ? 'completed' : ''}">
+                                <!-- BARRA DE PROGRESO DEL PEDIDO -->
+                                <div class="order-progress-section">
+                                    <div class="order-progress-info">
+                                        <span><strong>${order.product_type}</strong> - ${order.quantity_completed}/${order.quantity} (${Math.round(progressPercentage)}%)</span>
+                                        <span class="order-value">$${(order.price * order.quantity).toLocaleString()}</span>
+                                    </div>
+                                    <div class="order-progress-bar">
+                                        <div class="order-progress-fill ${isCompleted ? 'completed' : ''}" style="width: ${progressPercentage}%"></div>
+                                    </div>
+                                </div>
+
+                                <!-- DETALLES DEL PEDIDO -->
+                                <div class="order-details">
+                                    <div class="order-detail">
+                                        <div class="order-detail-label">Cantidad</div>
+                                        <div class="order-detail-value">${order.quantity}</div>
+                                    </div>
+                                    <div class="order-detail">
+                                        <div class="order-detail-label">Talla</div>
+                                        <div class="order-detail-value">${formatSizeDisplay(order)}</div>
+                                    </div>
+                                    <div class="order-detail">
+                                        <div class="order-detail-label">Color</div>
+                                        <div class="order-detail-value">${order.color}</div>
+                                    </div>
+                                    <div class="order-detail">
+                                        <div class="order-detail-label">Estado</div>
+                                        <div class="order-detail-value ${getStatusClass(order.status)}">${getStatusText(order.status)}</div>
+                                    </div>
+                                    <div class="order-detail">
+                                        <div class="order-detail-label">Fecha Entrega</div>
+                                        <div class="order-detail-value">${formatDate(order.due_date)}</div>
+                                    </div>
+                                    <div class="order-detail ${isOverdue ? 'overdue' : isUrgent ? 'urgent' : ''}">
+                                        <div class="order-detail-label">Días Restantes</div>
+                                        <div class="order-detail-value">
+                                            ${isOverdue ? `${Math.abs(daysRemaining)} días vencido` : 
+                                            daysRemaining === 0 ? ' ⚠ Vence hoy' : 
+                                            `${daysRemaining} días`}
+                                        </div>
+                                    </div>
+                                    <div class="order-detail">
+                                        <div class="order-detail-label">Precio por unidad</div>
+                                        <div class="order-detail-value">$${order.price.toLocaleString()}</div>
+                                    </div>
+                                    <div class="order-detail total-highlight">
+                                        <div class="order-detail-label">Total Pedido</div>
+                                        <div class="order-detail-value">$${(order.price * order.quantity).toLocaleString()}</div>
+                                    </div>
+                                </div>
+                                
+                                ${order.notes ? `<div class="order-notes"><strong>Notas:</strong> ${order.notes}</div>` : ''}
+                                
+                                <!-- SECCIÓN PARA AGREGAR PROGRESO (solo si no está completado) -->
+                                ${remaining > 0 ? `
+                                    <div class="add-progress-section">
+                                        ${order.size === 'MIXTAS' && order.size_progress ? `
+                                            <div class="mixed-sizes-progress">
+                                                <h5>Agregar Progreso por Talla</h5>
+                                                <div class="size-progress-grid">
+                                                    ${Object.entries(JSON.parse(order.size_distribution || '{}')).map(([size, totalQty]) => {
+                                                        const completedForSize = sizeProgressData[order.id]?.[size] || 0;
+                                                        const remainingForSize = totalQty - completedForSize;
+                                                        const progressPercent = Math.round((completedForSize / totalQty) * 100);
+                                                        
+                                                        return remainingForSize > 0 ? `
+                                                            <div class="size-progress-item">
+                                                                <div class="size-header">
+                                                                    <label>Talla ${size}</label>
+                                                                    <span class="size-progress-info">${completedForSize}/${totalQty} (${progressPercent}%)</span>
+                                                                </div>
+                                                                <div class="size-progress-bar">
+                                                                    <div class="size-progress-fill" style="width: ${progressPercent}%; background: #4CAF50;"></div>
+                                                                </div>
+                                                                <div class="size-input-group">
+                                                                    <input type="number" 
+                                                                        id="progress-${order.id}-${size}" 
+                                                                        min="1" 
+                                                                        max="${remainingForSize}" 
+                                                                        placeholder="Cantidad"
+                                                                        class="progress-input size-specific">
+                                                                    <button class="btn btn-success btn-small" onclick="addProgressBySize(${order.id}, '${size}')">
+                                                                        <i class="fas fa-plus"></i> Agregar
+                                                                    </button>
+                                                                    <button class="btn btn-primary btn-small" onclick="completeSize(${order.id}, '${size}')">
+                                                                        <i class="fas fa-check"></i> +${remainingForSize}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ` : `
+                                                            <div class="size-progress-item completed">
+                                                                <div class="size-header">
+                                                                    <label>Talla ${size}</label>
+                                                                    <span class="size-progress-info completed">✅ Completada (${totalQty}/${totalQty})</span>
+                                                                </div>
+                                                                <div class="size-progress-bar">
+                                                                    <div class="size-progress-fill completed" style="width: 100%; background: #4CAF50;"></div>
+                                                                </div>
+                                                            </div>
+                                                        `;
+                                                    }).join('')}
+                                                </div>
+                                            </div>
+                                        ` : `
+                                            <div class="progress-input-group">
+                                                <input type="number" 
+                                                    id="progress-${order.id}" 
+                                                    min="1" 
+                                                    max="${remaining}" 
+                                                    placeholder="Cantidad completada"
+                                                    class="progress-input">
+                                                <button class="btn btn-success btn-small" onclick="addProgress(${order.id})">
+                                                    <i class="fas fa-plus"></i> Agregar Progreso
+                                                </button>
+                                            </div>
+                                        `}
+                                    </div>
+                                ` : `<div class="completed-badge">✅ Pedido Completado</div>`}
+
+                                <!-- ACCIONES DEL PEDIDO -->
+                                <div class="order-actions">
+                                    ${remaining > 0 ? `
+                                        <button class="btn btn-success btn-small" onclick="completeProduct(${order.id})">
+                                            <i class="fas fa-check"></i> Completar
+                                        </button>
+                                    ` : ''}
+                                    <button class="btn btn-primary btn-small" onclick="editProduct(${order.id})">
+                                        <i class="fas fa-edit"></i> Editar
+                                    </button>
+                                    <button class="btn btn-danger btn-small" onclick="deleteProduct(${order.id})">
+                                        <i class="fas fa-trash"></i> Eliminar
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+
+                <!-- ACCIONES DEL CLIENTE (si tiene pedidos pendientes) -->
+                ${!allCompleted ? `
+                    <div class="client-actions-container">
+                        <button class="btn btn-success btn-complete-client" onclick="completeAllClientOrders('${clientName}')">
+                            <i class="fas fa-check-double"></i> Completar Todo el Cliente
+                        </button>
                     </div>
                 ` : ''}
-
-                <div class="item-actions">
-                    ${remaining > 0 ? `
-                        <button class="btn btn-success btn-small" onclick="completeProduct(${item.id})">
-                            <i class="fas fa-check"></i> Completar Todo
-                        </button>
-                    ` : ''}
-                    <button class="btn btn-primary btn-small" onclick="editProduct(${item.id})">
-                        <i class="fas fa-edit"></i> Editar
-                    </button>
-                    <button class="btn btn-danger btn-small" onclick="deleteProduct(${item.id})">
-                        <i class="fas fa-trash"></i> Eliminar
-                    </button>
                 </div>
             </div>
         `;
@@ -818,7 +1029,7 @@ async function addProgress(id) {
            await loadData();
        }
        
-       renderInventory();
+       await renderInventory();
        updateStats();
        
    } catch (error) {
@@ -848,7 +1059,7 @@ async function completeProduct(id) {
                 showNotification('Producto completado y archivado exitosamente', 'success');
                 
                 await loadData();
-                renderInventory();
+                await renderInventory();
                 updateStats();
                 
             } catch (error) {
@@ -893,6 +1104,19 @@ function editProduct(id) {
         document.getElementById('productType').value = product.product_type;
         document.getElementById('quantity').value = product.quantity;
         document.getElementById('size').value = product.size === 'No especificada' ? '' : product.size;
+        toggleMixedSizes();
+        if (product.size === 'MIXTAS' && product.size_distribution) {
+            try {
+                const distribution = JSON.parse(product.size_distribution);
+                Object.entries(distribution).forEach(([size, qty]) => {
+                    const input = document.getElementById(`size${size}`);
+                    if (input) input.value = qty;
+                });
+                updateMixedSizesTotal();
+            } catch (e) {
+                console.error('Error cargando distribución de tallas:', e);
+            }
+        }
         document.getElementById('color').value = product.color === 'No especificado' ? '' : product.color;
         document.getElementById('status').value = product.status;
         document.getElementById('dueDate').value = product.due_date;
@@ -928,7 +1152,7 @@ async function deleteProduct(id) {
                 showNotification('Producto eliminado y archivado exitosamente', 'success');
                 
                 await loadData();
-                renderInventory();
+                await renderInventory();
                 updateStats();
                 
             } catch (error) {
@@ -939,7 +1163,7 @@ async function deleteProduct(id) {
     );
 }
 
-function filterInventory() {
+async function filterInventory() {
     const searchTerm = document.getElementById('searchInput').value.toLowerCase();
     
     if (!searchTerm) {
@@ -954,7 +1178,7 @@ function filterInventory() {
         );
     }
     
-    renderInventory();
+    await renderInventory();
 }
 
 function showNotification(message, type = 'info') {
@@ -1019,6 +1243,15 @@ async function exportToCSV() {
 }
     
     showNotification('Datos exportados exitosamente', 'success');
+}
+
+async function getCompletedBySizeForOrder(orderId, size) {
+    try {
+        return await Database.getCompletedBySizeForOrder(orderId, size);
+    } catch (error) {
+        console.error('Error obteniendo progreso por talla:', error);
+        return 0;
+    }
 }
 
 async function generateReport() {
@@ -1866,6 +2099,470 @@ async function clearHistory() {
             } catch (error) {
                 console.error('Error limpiando historial:', error);
                 showNotification('Error al limpiar historial', 'error');
+            }
+        }
+    );
+}
+
+function toggleMixedSizes() {
+    const sizeSelect = document.getElementById('size');
+    const mixedSizesSection = document.getElementById('mixedSizesSection');
+    const quantityInput = document.getElementById('quantity');
+    
+    if (sizeSelect.value === 'MIXTAS') {
+        mixedSizesSection.style.display = 'block';
+        mixedSizesSection.classList.add('show');
+        
+        quantityInput.readOnly = true;
+        quantityInput.style.background = '#F5F5F5';
+        quantityInput.style.cursor = 'not-allowed';
+        quantityInput.placeholder = 'Se calcula automáticamente';
+        
+        updateMixedSizesTotal();
+    } else {
+        mixedSizesSection.style.display = 'none';
+        mixedSizesSection.classList.remove('show');
+        
+        quantityInput.readOnly = false;
+        quantityInput.style.background = '';
+        quantityInput.style.cursor = '';
+        quantityInput.placeholder = 'Cantidad de productos';
+        
+        clearMixedSizeInputs();
+    }
+}
+
+function updateMixedSizesTotal() {
+    const sizeInputs = document.querySelectorAll('.size-input');
+    let total = 0;
+    
+    sizeInputs.forEach(input => {
+        const value = parseInt(input.value) || 0;
+        total += value;
+    });
+    
+    document.getElementById('sizesTotalDisplay').textContent = total;
+    document.getElementById('quantity').value = total;
+    
+    return total;
+}
+
+function clearMixedSizeInputs() {
+    const sizeInputs = document.querySelectorAll('.size-input');
+    sizeInputs.forEach(input => {
+        input.value = 0;
+    });
+    document.getElementById('sizesTotalDisplay').textContent = '0';
+}
+
+function getMixedSizesDistribution() {
+    const sizes = {};
+    const sizeInputs = document.querySelectorAll('.size-input');
+    
+    sizeInputs.forEach(input => {
+        const sizeType = input.id.replace('size', '');
+        const quantity = parseInt(input.value) || 0;
+        if (quantity > 0) {
+            sizes[sizeType] = quantity;
+        }
+    });
+    
+    return sizes;
+}
+
+function validateMixedSizes() {
+    const sizeSelect = document.getElementById('size');
+    
+    if (sizeSelect.value === 'MIXTAS') {
+        const total = updateMixedSizesTotal();
+        if (total === 0) {
+            showNotification('Debes especificar al menos una cantidad para las tallas mixtas', 'error');
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+function formatSizeDisplay(item) {
+    if (item.size === 'MIXTAS' && item.size_distribution) {
+        try {
+            const distribution = JSON.parse(item.size_distribution);
+            if (Object.keys(distribution).length > 0) {
+                const sizeBreakdown = Object.entries(distribution)
+                    .filter(([size, qty]) => qty > 0)
+                    .map(([size, qty]) => `${size}: ${qty}`)
+                    .join(', ');
+                return `Tallas Mixtas (${sizeBreakdown})`;
+            }
+        } catch (e) {
+            console.error('Error parsing size distribution:', e);
+        }
+    }
+    return item.size || 'No especificada';
+}
+
+async function addProgressBySize(orderId, size) {
+    console.log('=== DEBUG addProgressBySize ===');
+    console.log('OrderId:', orderId, 'Size:', size);
+    
+    const input = document.getElementById(`progress-${orderId}-${size}`);
+    console.log('Input encontrado:', input);
+    
+    if (!input) {
+        console.error('Input no encontrado');
+        showNotification('Error: Campo de entrada no encontrado', 'error');
+        return;
+    }
+    
+    const quantity = parseInt(input.value);
+    console.log('Quantity:', quantity);
+    
+    if (!quantity || quantity <= 0) {
+        showNotification('Ingresa una cantidad válida', 'error');
+        return;
+    }
+
+    const order = inventory.find(item => item.id === orderId);
+    try {
+        const sizeDistribution = JSON.parse(order.size_distribution || '{}');
+        const totalForSize = sizeDistribution[size] || 0;
+        const completedForSize = await Database.getCompletedBySizeForOrder(orderId, size);
+        const remainingForSize = totalForSize - completedForSize;
+        
+        if (quantity > remainingForSize) {
+            showNotification(`Solo puedes agregar hasta ${remainingForSize} unidades para talla ${size}`, 'error');
+            return;
+        }
+    } catch (error) {
+        console.error('Error validando límite:', error);
+        showNotification('Error al validar límite de talla', 'error');
+        return;
+    }
+    
+    try {
+        console.log('Llamando a Database.updateProgressBySize...');
+        await Database.updateProgressBySize(orderId, size, quantity);
+        
+        showNotification(`Progreso agregado: +${quantity} unidades talla ${size}`, 'success');
+        input.value = '';
+        
+        await loadData();
+        await renderInventory();
+        updateStats();
+        await checkAndCompleteOrder(orderId);
+        
+    } catch (error) {
+        console.error('Error completo:', error);
+        showNotification('Error al agregar progreso: ' + error.message, 'error');
+    }
+}
+
+async function completeSize(orderId, size) {
+    const order = inventory.find(item => item.id === orderId);
+    if (!order || order.size !== 'MIXTAS') {
+        showNotification('Error: Pedido no encontrado o no es de tallas mixtas', 'error');
+        return;
+    }
+    
+    try {
+        const sizeDistribution = JSON.parse(order.size_distribution || '{}');
+        const totalForSize = sizeDistribution[size] || 0;
+        const completedForSize = await Database.getCompletedBySizeForOrder(orderId, size);
+        const remainingForSize = totalForSize - completedForSize;
+        
+        if (remainingForSize <= 0) {
+            showNotification(`La talla ${size} ya está completada`, 'info');
+            return;
+        }
+        
+        showConfirmModal(
+            'Completar Talla',
+            `¿Completar las ${remainingForSize} unidades restantes de talla ${size}?`,
+            async () => {
+                try {
+                    await Database.updateProgressBySize(orderId, size, remainingForSize);
+                    showNotification(`Talla ${size} completada: +${remainingForSize} unidades`, 'success');
+                    
+                    await loadData();
+                    await renderInventory();
+                    updateStats();
+                    await checkAndCompleteOrder(orderId);
+                } catch (error) {
+                    console.error('Error completando talla:', error);
+                    showNotification('Error al completar talla', 'error');
+                }
+            }
+        );
+        
+    } catch (error) {
+        console.error('Error completando talla:', error);
+        showNotification('Error al completar talla', 'error');
+    }
+}
+
+async function checkAndCompleteOrder(orderId) {
+    try {
+        const order = inventory.find(item => item.id === orderId);
+        if (!order || order.size !== 'MIXTAS') return;
+        
+        const sizeDistribution = JSON.parse(order.size_distribution || '{}');
+        
+        let totalCompleted = 0;
+        let totalRequired = 0;
+        
+        for (const [size, requiredQty] of Object.entries(sizeDistribution)) {
+            const completedForSize = await Database.getCompletedBySizeForOrder(orderId, size);
+            totalCompleted += completedForSize;
+            totalRequired += requiredQty;
+        }
+        
+        if (totalCompleted >= totalRequired) {
+            console.log(`Pedido ${orderId} completado al 100%, archivando...`);
+            
+            if (order.quantity_completed < order.quantity) {
+                const remaining = order.quantity - order.quantity_completed;
+                await Database.updateProgress(orderId, remaining);
+            }
+            
+            const today = new Date().toISOString().split('T')[0];
+            await Database.archiveProduct(orderId, 'completed', today);
+            
+            showNotification('Pedido completado automáticamente y movido al historial', 'success');
+            
+            await loadData();
+            await renderInventory();
+            updateStats();
+        }
+        
+    } catch (error) {
+        console.error('Error verificando completitud del pedido:', error);
+    }
+}
+
+function calculateMixedSizeProgress(order, sizeProgressData) {
+    try {
+        const sizeDistribution = JSON.parse(order.size_distribution);
+        let totalCompleted = 0;
+        let totalRequired = 0;
+        
+        for (const [size, requiredQty] of Object.entries(sizeDistribution)) {
+            const completedForSize = sizeProgressData[order.id]?.[size] || 0;
+            totalCompleted += completedForSize;
+            totalRequired += requiredQty;
+        }
+        
+        return totalRequired > 0 ? (totalCompleted / totalRequired) * 100 : 0;
+    } catch (error) {
+        console.error('Error calculando progreso:', error);
+        return (order.quantity_completed / order.quantity) * 100;
+    }
+}
+
+
+function showAsyncConfirm(title, message) {
+    return new Promise((resolve) => {
+        showConfirmModal(title, message, 
+            () => resolve(true),
+            () => resolve(false)
+        );
+    });
+}
+
+function showCurrentOrder() {
+    const section = document.getElementById('currentOrderSection');
+    const clientNameSpan = document.getElementById('currentClientName');
+    const itemsContainer = document.getElementById('currentOrderItems');
+    
+    if (!currentOrder.isActive || currentOrder.items.length === 0) {
+        section.style.display = 'none';
+        return;
+    }
+    
+    section.style.display = 'block';
+    clientNameSpan.textContent = currentOrder.clientName;
+    
+    const totalValue = currentOrder.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const totalItems = currentOrder.items.reduce((sum, item) => sum + item.quantity, 0);
+    
+    itemsContainer.innerHTML = `
+        <div class="order-summary">
+            <div class="order-stats">
+                <span><strong>Total productos:</strong> ${currentOrder.items.length}</span>
+                <span><strong>Total prendas:</strong> ${totalItems}</span>
+                <span><strong>Valor total:</strong> $${totalValue.toLocaleString()}</span>
+            </div>
+        </div>
+        <div class="order-items-list">
+            ${currentOrder.items.map((item, index) => `
+                <div class="order-item">
+                    <div class="item-info">
+                        <strong>${item.productType}</strong>
+                        <div class="item-details">
+                            Cantidad: ${item.quantity} | 
+                            Talla: ${formatOrderItemSize(item)} | 
+                            Color: ${item.color} | 
+                            Precio: $${item.price.toLocaleString()} | 
+                            Total: $${(item.price * item.quantity).toLocaleString()}
+                        </div>
+                        ${item.notes ? `<div class="item-notes">Notas: ${item.notes}</div>` : ''}
+                    </div>
+                    <button class="btn btn-danger btn-small" onclick="removeOrderItem(${index})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function formatOrderItemSize(item) {
+    if (item.size === 'MIXTAS' && item.sizeDistribution) {
+        try {
+            const distribution = JSON.parse(item.sizeDistribution);
+            const sizeBreakdown = Object.entries(distribution)
+                .filter(([size, qty]) => qty > 0)
+                .map(([size, qty]) => `${size}: ${qty}`)
+                .join(', ');
+            return `Mixtas (${sizeBreakdown})`;
+        } catch (e) {
+            return item.size;
+        }
+    }
+    return item.size;
+}
+
+function removeOrderItem(index) {
+    currentOrder.items.splice(index, 1);
+    showCurrentOrder();
+    showNotification('Producto eliminado del pedido', 'info');
+}
+
+async function finalizeOrder() {
+    if (!currentOrder.isActive || currentOrder.items.length === 0) {
+        showNotification('No hay productos en el pedido actual', 'error');
+        return;
+    }
+
+    try {
+        showNotification('Finalizando pedido...', 'info');
+        
+        for (const item of currentOrder.items) {
+            const productData = {
+                clientName: currentOrder.clientName,
+                productType: item.productType,
+                quantity: item.quantity,
+                size: item.size,
+                sizeDistribution: item.sizeDistribution,
+                color: item.color,
+                status: currentOrder.status,
+                dueDate: currentOrder.dueDate,
+                price: item.price,
+                notes: item.notes
+            };
+
+            await Database.addProduct(productData);
+        }
+
+        currentOrder = {
+            clientName: '',
+            items: [],
+            isActive: false
+        };
+
+        showCurrentOrder();
+        clearProductForm();
+        await loadData();
+        renderInventory();
+        updateStats();
+
+        showNotification(`Pedido finalizado exitosamente con ${currentOrder.items.length} productos`, 'success');
+        
+    } catch (error) {
+        console.error('Error finalizando pedido:', error);
+        showNotification('Error al finalizar pedido', 'error');
+    }
+}
+
+async function finalizeCurrentOrder() {
+    await finalizeOrder();
+}
+
+function cancelOrder() {
+    if (!currentOrder.isActive) return;
+    
+    showConfirmModal(
+        'Cancelar Pedido',
+        `¿Estás seguro de que deseas cancelar el pedido de ${currentOrder.clientName} con ${currentOrder.items.length} productos?`,
+        () => {
+            currentOrder = {
+                clientName: '',
+                items: [],
+                isActive: false
+            };
+            showCurrentOrder();
+            clearProductForm();
+            showNotification('Pedido cancelado', 'info');
+        }
+    );
+}
+
+function clearProductForm() {
+    if (!currentOrder.isActive) {
+        document.getElementById('clientName').value = '';
+    }
+    
+    document.getElementById('productType').value = '';
+    document.getElementById('quantity').value = '';
+    document.getElementById('size').value = '';
+    document.getElementById('color').value = '';
+    document.getElementById('notes').value = '';
+    document.getElementById('price').value = '';
+    
+    toggleMixedSizes();
+}
+
+async function completeAllClientOrders(clientName) {
+    const clientOrders = inventory.filter(item => 
+        item.client_name === clientName && 
+        item.quantity_completed < item.quantity
+    );
+    
+    if (clientOrders.length === 0) {
+        showNotification('No hay pedidos pendientes para este cliente', 'info');
+        return;
+    }
+
+    const totalPending = clientOrders.reduce((sum, order) => 
+        sum + (order.quantity - order.quantity_completed), 0
+    );
+
+    showConfirmModal(
+        'Completar Todo el Cliente',
+        `¿Estás seguro de que deseas completar todos los pedidos pendientes de ${clientName}? Se completarán ${totalPending} prendas en ${clientOrders.length} pedidos.`,
+        async () => {
+            try {
+                showNotification(`Completando todos los pedidos de ${clientName}...`, 'info');
+                
+                for (const order of clientOrders) {
+                    const remaining = order.quantity - order.quantity_completed;
+                    if (remaining > 0) {
+                        await Database.updateProgress(order.id, remaining);
+                        
+                        const today = new Date().toISOString().split('T')[0];
+                        await Database.archiveProduct(order.id, 'completed', today);
+                    }
+                }
+
+                showNotification(`Todos los pedidos de ${clientName} completados exitosamente`, 'success');
+                
+                await loadData();
+                renderInventory();
+                updateStats();
+                
+            } catch (error) {
+                console.error('Error completando pedidos del cliente:', error);
+                showNotification(`Error al completar pedidos: ${error.message}`, 'error');
             }
         }
     );
