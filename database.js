@@ -29,11 +29,13 @@ class Database {
                     quantity: productData.quantity,
                     quantity_completed: 0,
                     size: productData.size,
+                    size_distribution: productData.sizeDistribution,
                     color: productData.color,
                     status: productData.status,
                     due_date: productData.dueDate,
                     price: productData.price,
-                    notes: productData.notes
+                    notes: productData.notes,
+                    size_progress: productData.sizeDistribution
                 }])
                 .select();
             
@@ -126,125 +128,193 @@ class Database {
             throw error;
         }
     }
-static async archiveProduct(id, action, completedDate = null) {
-    try {
-        const { data: product, error: fetchError } = await supabase
-            .from('products')
-            .select('*')
-            .eq('id', id)
-            .single();
+    static async archiveProduct(id, action, completedDate = null) {
+        try {
+            const { data: product, error: fetchError } = await supabase
+                .from('products')
+                .select('*')
+                .eq('id', id)
+                .single();
 
-        if (fetchError) {
-            console.error('Error obteniendo producto:', fetchError);
-            throw fetchError;
-        }
+            if (fetchError) {
+                console.error('Error obteniendo producto:', fetchError);
+                throw fetchError;
+            }
 
-        if (!product) {
-            throw new Error('Producto no encontrado');
-        }
+            if (!product) {
+                throw new Error('Producto no encontrado');
+            }
 
-        const finalCompletedDate = completedDate || new Date().toISOString().split('T')[0];
-        
-        const { error: insertError } = await supabase
-            .from('sales_history')
-            .insert([{
-                original_product_id: id,
-                client_name: product.client_name,
-                product_type: product.product_type,
-                quantity: product.quantity,
-                quantity_completed: product.quantity_completed,
-                price: product.price,
-                total_value: product.price * product.quantity_completed,
-                due_date: product.due_date,
-                completed_date: finalCompletedDate,
-                action: action,
-                archived_at: new Date().toISOString()
-            }]);
+            const finalCompletedDate = completedDate || new Date().toISOString().split('T')[0];
+            
+            const { error: insertError } = await supabase
+                .from('sales_history')
+                .insert([{
+                    original_product_id: id,
+                    client_name: product.client_name,
+                    product_type: product.product_type,
+                    quantity: product.quantity,
+                    quantity_completed: product.quantity_completed,
+                    price: product.price,
+                    total_value: product.price * product.quantity_completed,
+                    due_date: product.due_date,
+                    completed_date: finalCompletedDate,
+                    action: action,
+                    archived_at: new Date().toISOString()
+                }]);
 
-        if (insertError) {
-            console.error('Error insertando en historial:', insertError);
-            throw insertError;
-        }
+            if (insertError) {
+                console.error('Error insertando en historial:', insertError);
+                throw insertError;
+            }
 
-        const { error: deleteError } = await supabase
-            .from('products')
-            .delete()
-            .eq('id', id);
+            const { error: deleteError } = await supabase
+                .from('products')
+                .delete()
+                .eq('id', id);
 
-        if (deleteError) {
-            console.error('Error eliminando producto:', deleteError);
-            throw deleteError;
-        }
+            if (deleteError) {
+                console.error('Error eliminando producto:', deleteError);
+                throw deleteError;
+            }
 
-        console.log('Producto archivado correctamente:', { id, action, client: product.client_name });
-        return true;
+            console.log('Producto archivado correctamente:', { id, action, client: product.client_name });
+            return true;
 
-    } catch (error) {
-        console.error('Error completo en archiveProduct:', error);
-        throw error;
-    }
-}
-
-static async getSalesHistory(limit = 50) {
-    try {
-        const { data, error } = await supabase
-            .from('sales_history')
-            .select('*')
-            .order('archived_at', { ascending: false })
-            .limit(limit);
-        
-        if (error) {
-            console.error('Error obteniendo historial:', error);
+        } catch (error) {
+            console.error('Error completo en archiveProduct:', error);
             throw error;
         }
-        
-        return data || [];
-    } catch (error) {
-        console.error('Error en getSalesHistory:', error);
-        return [];
     }
-}
 
-static async getMonthlyReport(year, month) {
-    try {
-        const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
-        const endDate = month === 12 
-            ? `${year + 1}-01-01` 
-            : `${year}-${(month + 1).toString().padStart(2, '0')}-01`;
+    static async getSalesHistory(limit = 50) {
+        try {
+            const { data, error } = await supabase
+                .from('sales_history')
+                .select('*')
+                .order('archived_at', { ascending: false })
+                .limit(limit);
+            
+            if (error) {
+                console.error('Error obteniendo historial:', error);
+                throw error;
+            }
+            
+            return data || [];
+        } catch (error) {
+            console.error('Error en getSalesHistory:', error);
+            return [];
+        }
+    }
 
-        const { data, error } = await supabase
-            .from('sales_history')
-            .select('*')
-            .gte('archived_at', startDate)
-            .lt('archived_at', endDate)
-            .order('archived_at', { ascending: false });
-        
-        if (error) {
-            console.error('Error obteniendo reporte mensual:', error);
+    static async getMonthlyReport(year, month) {
+        try {
+            const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
+            const endDate = month === 12 
+                ? `${year + 1}-01-01` 
+                : `${year}-${(month + 1).toString().padStart(2, '0')}-01`;
+
+            const { data, error } = await supabase
+                .from('sales_history')
+                .select('*')
+                .gte('archived_at', startDate)
+                .lt('archived_at', endDate)
+                .order('archived_at', { ascending: false });
+            
+            if (error) {
+                console.error('Error obteniendo reporte mensual:', error);
+                throw error;
+            }
+            
+            return data || [];
+        } catch (error) {
+            console.error('Error en getMonthlyReport:', error);
+            return [];
+        }
+    }
+
+    static async clearAllHistory() {
+        try {
+            const { error } = await supabase
+                .from('sales_history')
+                .delete()
+                .neq('id', 0);
+            
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error limpiando historial:', error);
             throw error;
         }
-        
-        return data || [];
-    } catch (error) {
-        console.error('Error en getMonthlyReport:', error);
-        return [];
     }
-}
 
-static async clearAllHistory() {
-    try {
-        const { error } = await supabase
-            .from('sales_history')
-            .delete()
-            .neq('id', 0);
-        
-        if (error) throw error;
-        return true;
-    } catch (error) {
-        console.error('Error limpiando historial:', error);
-        throw error;
+    static async updateProgressBySize(orderId, size, quantity) {
+        try {
+            const { data: product, error: fetchError } = await supabase
+                .from('products')
+                .select('*')
+                .eq('id', orderId)
+                .single();
+            
+            if (fetchError) throw fetchError;
+
+            const { error } = await supabase
+                .from('progress_history')
+                .insert({
+                    product_id: orderId,
+                    quantity_added: quantity,
+                    quantity_before: product.quantity_completed, 
+                    quantity_after: product.quantity_completed + quantity, 
+                    size_specific: size,
+                    notes: `Progreso talla ${size}: +${quantity}`
+                });
+                
+            if (error) throw error;
+            
+            await this.updateProgress(orderId, quantity, `Progreso talla ${size}: +${quantity}`);
+            
+        } catch (error) {
+            console.error('Error updating progress by size:', error);
+            throw error;
+        }
     }
-}
+
+    static async getCompletedBySizeForOrder(orderId, size) {
+        try {
+            const { data, error } = await supabase
+                .from('progress_history')
+                .select('quantity_added')
+                .eq('product_id', orderId)
+                .eq('size_specific', size);
+                
+            if (error) throw error;
+            
+            const total = data?.reduce((sum, record) => sum + record.quantity_added, 0) || 0;
+            return total;
+            
+        } catch (error) {
+            console.error('Error getting completed by size:', error);
+            return 0;
+        }
+    }
+
+    static async getCompletedBySizeSync(orderId, size) {
+        try {
+            const { data, error } = await supabase
+                .from('progress_history')
+                .select('quantity_added')
+                .eq('product_id', orderId)
+                .eq('size_specific', size);
+                
+            if (error) throw error;
+            
+            return data?.reduce((sum, record) => sum + record.quantity_added, 0) || 0;
+            
+        } catch (error) {
+            console.error('Error getting completed by size sync:', error);
+            return 0;
+        }
+    }
+
 
 }
-
