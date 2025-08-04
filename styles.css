@@ -527,8 +527,11 @@ body {
     }
 
     .section {
+        .section .section quick-actions {
+
         padding: 15px !important;
         margin: 10px !important;
+        }
     }
     
     .form-group input,
@@ -2742,3 +2745,4 @@ body {
 .size-input-group .btn-small i {
     margin-right: 5px;
 }
+
