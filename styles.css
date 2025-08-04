@@ -1797,7 +1797,6 @@ body {
     content: '⚠️ ';
 }
 
-/* Modal para instrucciones móvil */
 .mobile-download-modal .modal-content {
     max-width: 450px;
 }
