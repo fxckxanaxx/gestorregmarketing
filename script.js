@@ -1502,8 +1502,8 @@ async function createHistoricalReport(doc, allData, startY, colors, margins, con
     
     const activityStats = [
         { label: 'Ordenes Completadas', value: completedOrders, color: colors.success },
-        { label: 'Ordenes Pendientes', value: pendingOrders, color: colors.warning },
-        { label: 'Ordenes Eliminadas', value: deletedOrders, color: colors.danger },
+        { label: 'Ordenes Pendientes', value: pendingOrders, color: colors.danger },
+        { label: 'Ordenes Eliminadas', value: deletedOrders, color: colors.warning },
         { label: 'Total en Sistema', value: allData.length, color: colors.primary }
     ];
     
