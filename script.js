@@ -1217,7 +1217,9 @@ async function generateMonthlyReport() {
             quantity: item.quantity
         }));
 
-        const allData = [...(monthlyData || []), ...currentData];
+        const filteredMonthlyData = (monthlyData || []).filter(item => item.action === 'completed');
+
+        const allData = [...filteredMonthlyData, ...currentData];
         console.log('Datos mensuales obtenidos:', monthlyData);
         
         await createProfessionalPDF(allData, currentMonth, currentYear);    
